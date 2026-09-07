@@ -1,0 +1,61 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function isOwner() {
+      return signedIn() && request.auth.uid == "dKjFxtiG8OP3Qh29lqaPPUNsPM23";
+    }
+    function isStaff() {
+      return isOwner() || (signedIn() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "CLIST");
+    }
+
+    match /users/{uid} {
+      allow read: if signedIn();
+      allow create: if signedIn() && request.auth.uid == uid
+        && request.resource.data.role == (request.auth.uid == "dKjFxtiG8OP3Qh29lqaPPUNsPM23" ? "owner" : "member")
+        && request.resource.data.titles is list;
+      allow update: if isOwner()
+        || (signedIn() && request.auth.uid == uid
+          && request.resource.data.role == resource.data.role
+          && request.resource.data.titles == resource.data.titles)
+        || (isStaff()
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['titles'])
+          && request.resource.data.titles is list);
+      allow delete: if isOwner();
+    }
+
+    match /purchaseOrders/{id} {
+      allow read: if signedIn() && (isOwner() || resource.data.uid == request.auth.uid);
+      allow create: if signedIn()
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.status == "pending"
+        && get(/databases/$(database)/documents/siteSettings/main).data.roleShopEnabled == true;
+      allow update: if isOwner();
+      allow delete: if isOwner();
+    }
+
+    match /giveaways/{id} {
+      allow read: if true;
+      allow create: if isOwner();
+      allow update: if signedIn() && (
+        isOwner() ||
+        (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['participants'])
+          && request.resource.data.participants.size() <= resource.data.maxParticipants
+          && request.auth.uid in request.resource.data.participants)
+      );
+      allow delete: if isOwner();
+    }
+
+    match /siteSettings/{id} {
+      allow read: if true;
+      allow create, update, delete: if isOwner();
+    }
+
+    match /presence/{id} {
+      allow read: if true;
+      allow create: if signedIn() && request.resource.data.uid == request.auth.uid;
+      allow update: if signedIn() && resource.data.uid == request.auth.uid && request.resource.data.uid == request.auth.uid;
+      allow delete: if signedIn() && resource.data.uid == request.auth.uid;
+    }
+  }
+}
